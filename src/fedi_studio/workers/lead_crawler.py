@@ -228,7 +228,17 @@ def _build_row(post: dict, embedding: np.ndarray, fallback_host: str) -> tuple |
 
 
 def _flush_batch(batch: list[tuple[dict, str]]) -> int:
-    """Embed + upsert a batch. Returns count inserted."""
+    """Embed + upsert a batch. Returns count inserted.
+
+    Performance fix (2026-05-02): replaced per-row SAVEPOINT/INSERT with
+    pre-SELECT URI filter + single multi-VALUES batch INSERT. Cuts DB
+    round-trips from O(N) per flush to ~3, and eliminates row-lock contention
+    on the (uri, posted_at) unique index when 2 replicas flush concurrently.
+
+    Mirrors the pattern used in tools/fedi/src/fedi/services/mass_crawler.py
+    `_flush_posts`, adapted for psycopg3 (multi-VALUES sql.Composed instead
+    of psycopg2.extras.execute_values).
+    """
     if not batch:
         return 0
     contents = [strip_html(p.get("content") or "") for p, _ in batch]
@@ -248,54 +258,87 @@ def _flush_batch(batch: list[tuple[dict, str]]) -> int:
     if not rows:
         return 0
 
+    # Build candidates_pending rows in lockstep with v2 rows
+    cand_rows: list[tuple[str, str]] = []
+    for row in rows:
+        uri = row[0]
+        author_acct = row[2]
+        if author_acct and uri:
+            cand_rows.append((author_acct.lower(), uri))
+
     inserted = 0
     queued_for_enrichment = 0
-    sql = """
-        INSERT INTO posts (
-            uri, url, author_acct, content, content_hash,
-            tags, language, in_reply_to_id, sensitive,
-            media_count, favourites_count, reblogs_count,
-            posted_at, embedding,
-            local_id, media_attachments, account_avatar, account_display_name
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (uri, posted_at) DO UPDATE SET
-            favourites_count = GREATEST(posts.favourites_count, EXCLUDED.favourites_count),
-            reblogs_count    = GREATEST(posts.reblogs_count,    EXCLUDED.reblogs_count),
-            media_attachments = EXCLUDED.media_attachments,
-            account_avatar = COALESCE(posts.account_avatar, EXCLUDED.account_avatar),
-            account_display_name = COALESCE(posts.account_display_name, EXCLUDED.account_display_name)
-    """
-    pending_sql = """
-        INSERT INTO candidates_pending (acct, source_post_uri)
-        VALUES (%s, %s)
-        ON CONFLICT (acct) DO NOTHING
-    """
+
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                for row in rows:
-                    cur.execute("SAVEPOINT row_sp")
+                # Pre-filter URIs already present to avoid row-lock contention on
+                # the (uri, posted_at) unique index. Belt-and-suspenders ON
+                # CONFLICT DO NOTHING below handles any race.
+                try:
+                    uris = [r[0] for r in rows]
+                    cur.execute(
+                        "SELECT uri FROM posts WHERE uri = ANY(%s::text[])",
+                        (uris,),
+                    )
+                    existing = {r[0] for r in cur.fetchall()}
+                    if existing:
+                        rows = [r for r in rows if r[0] not in existing]
+                except Exception as _e:
+                    log.warning("prefilter failed (continuing with all rows): %s", _e)
                     try:
-                        cur.execute(sql, row)
-                        if cur.rowcount > 0:
-                            inserted += 1
-                            author_acct = row[2]
-                            uri = row[0]
-                            if author_acct:
-                                cur.execute(pending_sql, (author_acct, uri))
-                                if cur.rowcount > 0:
-                                    queued_for_enrichment += 1
-                        cur.execute("RELEASE SAVEPOINT row_sp")
-                    except Exception as e:
-                        cur.execute("ROLLBACK TO SAVEPOINT row_sp")
-                        log.debug("row insert failed: %s", e)
+                        conn.rollback()
+                    except Exception:
+                        pass
+
+                if rows:
+                    # Single multi-VALUES INSERT. psycopg3 has no execute_values,
+                    # so we build the VALUES list with sql.SQL placeholders.
+                    placeholder_row = "(" + ", ".join(["%s"] * 18) + ")"
+                    values_sql = ", ".join([placeholder_row] * len(rows))
+                    flat_params: list = []
+                    for r in rows:
+                        flat_params.extend(r)
+                    insert_sql = (
+                        "INSERT INTO posts ("
+                        "uri, url, author_acct, content, content_hash, "
+                        "tags, language, in_reply_to_id, sensitive, "
+                        "media_count, favourites_count, reblogs_count, "
+                        "posted_at, embedding, "
+                        "local_id, media_attachments, account_avatar, account_display_name"
+                        ") VALUES " + values_sql + " "
+                        "ON CONFLICT (uri, posted_at) DO NOTHING "
+                        "RETURNING uri"
+                    )
+                    cur.execute(insert_sql, flat_params)
+                    returned = cur.fetchall()
+                    inserted = len(returned)
+
+                    # Batch INSERT candidates_pending for all candidates we built;
+                    # ON CONFLICT (acct) DO NOTHING dedups against existing rows.
+                    if cand_rows:
+                        cand_placeholder = "(" + ", ".join(["%s"] * 2) + ")"
+                        cand_values_sql = ", ".join([cand_placeholder] * len(cand_rows))
+                        cand_flat: list = []
+                        for cr in cand_rows:
+                            cand_flat.extend(cr)
+                        cand_sql = (
+                            "INSERT INTO candidates_pending (acct, source_post_uri) "
+                            "VALUES " + cand_values_sql + " "
+                            "ON CONFLICT (acct) DO NOTHING"
+                        )
+                        cur.execute(cand_sql, cand_flat)
+                        queued_for_enrichment = cur.rowcount or 0
             conn.commit()
     except Exception as e:
         log.warning("DB flush failed: %s", e)
         return 0
     _stats.inserted += inserted
-    if queued_for_enrichment > 0:
-        log.debug("queued %d new authors for candidate enrichment", queued_for_enrichment)
+    if inserted > 0 or queued_for_enrichment > 0:
+        log.info(
+            "[batch-write] stored=%d candidates_queued=%d batch=%d",
+            inserted, queued_for_enrichment, len(batch),
+        )
     return inserted
 
 
