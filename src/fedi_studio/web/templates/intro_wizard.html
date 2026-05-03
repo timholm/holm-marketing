@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - intro wizard</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard"><strong>intro</strong></a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    One-time wizard to draft your pinned <code>#introduction</code> post, three featured hashtags
+    for your profile, and a bio rewrite. <strong>You review and post manually on Mastodon.</strong>
+  </p>
+
+  <form method="POST" action="/intro-wizard">
+    <fieldset class="form-group">
+      <legend class="form-label">pick the interests that should appear in your intro</legend>
+      <div class="interests-grid">
+        {% for code, label, _tags in interests %}
+        <label class="checkbox-row">
+          <input type="checkbox" name="interests" value="{{ code }}"
+                 {% if submitted and code in selected %}checked{% endif %}
+                 {% if not submitted %}checked{% endif %}>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <label class="form-label" for="extra_notes">anything specific to mention? (optional, &lt; 240 chars)</label>
+    <textarea id="extra_notes" name="extra_notes" rows="3"
+              placeholder="e.g. building a thinshell cabin in eastern arizona, cluster on rpi-12">{{ extra_notes or "" }}</textarea>
+
+    <div class="post-actions" style="margin-top: 1rem;">
+      <button class="btn btn-primary" type="submit">generate</button>
+      {% if submitted %}<a class="btn" href="/intro-wizard">start over</a>{% endif %}
+    </div>
+  </form>
+
+  {% if submitted %}
+  <section class="topic">
+    <h2>(a) intro post draft</h2>
+    {% if intro_text %}
+      <div class="draft-block">
+        <div class="draft-label">{{ intro_text|length }} characters · paste into mastodon compose</div>
+        <div class="draft-text" style="white-space: pre-wrap;">{{ intro_text }}</div>
+        <div class="post-actions" style="margin-top: 0.75rem;">
+          <button class="btn"
+                  type="button"
+                  onclick="navigator.clipboard.writeText({{ intro_text|tojson }}); this.textContent='copied'; setTimeout(()=>{this.textContent='⎘ copy intro'}, 1500);">
+            ⎘ copy intro
+          </button>
+          <a class="btn btn-primary" href="{{ mastodon_url }}/publish" target="_blank" rel="noopener">open mastodon compose ↗</a>
+        </div>
+      </div>
+    {% else %}
+      <div class="post-content">{{ intro_error }}</div>
+    {% endif %}
+  </section>
+
+  <section class="topic">
+    <h2>(b) featured hashtag suggestions</h2>
+    <p class="section-note">Add 3-5 of these to your profile's "Featured hashtags" so people can see your topic feeds.</p>
+    <div class="post-tags" style="font-size: 1rem;">
+      {% for t in featured_tags %}<span class="tag" style="font-size: 0.95rem; padding: 0.3rem 0.7rem;">{{ t }}</span>{% endfor %}
+    </div>
+    <div class="post-actions" style="margin-top: 0.75rem;">
+      <button class="btn"
+              type="button"
+              onclick="navigator.clipboard.writeText({{ (featured_tags|join(' '))|tojson }}); this.textContent='copied'; setTimeout(()=>{this.textContent='⎘ copy tags'}, 1500);">
+        ⎘ copy tags
+      </button>
+      <a class="btn" href="{{ mastodon_url }}/settings/featured_tags" target="_blank" rel="noopener">manage featured tags ↗</a>
+    </div>
+  </section>
+
+  <section class="topic">
+    <h2>(c) bio rewrite</h2>
+    {% if bio_text %}
+      <div class="draft-block">
+        <div class="draft-label">{{ bio_text|length }} characters · paste into profile bio field</div>
+        <div class="draft-text" style="white-space: pre-wrap;">{{ bio_text }}</div>
+        <div class="post-actions" style="margin-top: 0.75rem;">
+          <button class="btn"
+                  type="button"
+                  onclick="navigator.clipboard.writeText({{ bio_text|tojson }}); this.textContent='copied'; setTimeout(()=>{this.textContent='⎘ copy bio'}, 1500);">
+            ⎘ copy bio
+          </button>
+          <a class="btn" href="{{ mastodon_url }}/settings/profile" target="_blank" rel="noopener">edit profile ↗</a>
+        </div>
+      </div>
+    {% else %}
+      <div class="post-content">{{ bio_error }}</div>
+    {% endif %}
+  </section>
+  {% endif %}
+</main>
+
+<footer>
+  <p>fedi-studio · tool drafts; you post manually · pin the intro after you paste it on mastodon</p>
+</footer>
+
+</body>
+</html>

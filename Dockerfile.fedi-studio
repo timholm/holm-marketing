@@ -1,0 +1,61 @@
+# fedi-studio image — Python 3.12 + uv-managed venv, runs all workers + web.
+# Multi-stage to keep runtime small. Single image, command varies per workload.
+
+FROM python:3.12-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (lands at /usr/local/bin/uv when run as root)
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+WORKDIR /build
+
+# Build venv with deps (cache-friendly: lock file + manifest only).
+# README.md is referenced by pyproject.toml so copy it too.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv venv /opt/venv \
+    && uv sync --frozen --no-install-project --python /opt/venv/bin/python
+
+# Now bring in source and install the package itself
+COPY src/ ./src/
+RUN uv pip install --python /opt/venv/bin/python -e .
+
+# ----------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONPATH=/app/src
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 -d /home/fedi fedi
+
+WORKDIR /app
+
+# Bring venv from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Source + assets (chown to non-root user)
+COPY --chown=fedi:fedi src/        /app/src/
+COPY --chown=fedi:fedi migrations/ /app/migrations/
+COPY --chown=fedi:fedi scripts/    /app/scripts/
+COPY --chown=fedi:fedi models/     /app/models/
+
+USER fedi
+
+EXPOSE 8000
+
+# Default command runs the web app. Workers override via k8s manifest cmd.
+CMD ["uvicorn", "fedi_studio.web.app:app", "--host", "0.0.0.0", "--port", "8000"]

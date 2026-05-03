@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - people</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people"><strong>people</strong></a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    Every mention, reply, and DM you've received. Drafts are generated only for
+    in-interest topics. <strong>The drafter never apologizes, never admits fault,
+    never engages with politics or hostility</strong>. You review, edit, post manually.
+  </p>
+
+  {% if on_topic_ready %}
+  <section class="topic">
+    <h2>On-topic — ready to send <span class="count">{{ on_topic_ready|length }}</span></h2>
+    {% for r in on_topic_ready %}
+    <article class="post mention" id="mention-{{ r.id }}">
+      <div class="post-header">
+        {% if r.author_avatar %}
+        <img class="avatar" src="{{ r.author_avatar }}" alt="" loading="lazy">
+        {% endif %}
+        <div class="post-meta">
+          <div class="author-line">
+            {% if r.author_display_name %}<span class="display-name">{{ r.author_display_name }}</span>{% endif %}
+            <span class="author">@{{ r.author_acct }}</span>
+          </div>
+          <div class="meta-line">
+            <span class="time">{{ r.created_at.strftime("%a %H:%M") }}</span>
+            <span class="kind-badge">{{ r.kind }}</span>
+            {% if r.interaction_count > 1 %}
+            <span class="interaction-count">{{ r.interaction_count }} prior</span>
+            {% endif %}
+            {% if r.topic_match %}<span class="score">{{ r.topic_match }}</span>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      {% if r.parent_content %}
+      <div class="parent-quote">
+        <span class="quote-label">you:</span>
+        {{ r.parent_content[:280] }}{% if r.parent_content|length > 280 %}…{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="post-content">{{ r.post_content[:800]|default("(no text)", true) }}</div>
+
+      <div class="draft-block">
+        <div class="draft-label">draft (gemma2):</div>
+        <div class="draft-text" id="draft-{{ r.draft_id }}">{{ r.draft_text }}</div>
+      </div>
+
+      <div class="post-actions">
+        <a class="btn btn-primary"
+           href="{% if r.post_local_id %}{{ mastodon_url }}/web/statuses/{{ r.post_local_id }}{% else %}{{ r.post_url }}{% endif %}"
+           target="_blank" rel="noopener">
+          open & reply ↗
+        </a>
+        <button class="btn"
+                onclick="navigator.clipboard.writeText({{ r.draft_text|tojson }}); this.textContent='copied'"
+                title="Copy draft to clipboard">
+          ⎘ copy draft
+        </button>
+        <button class="btn"
+                hx-post="/people/regenerate"
+                hx-vals='{"mention_id": {{ r.id }}}'
+                hx-target="#draft-{{ r.draft_id }}"
+                hx-swap="outerHTML">
+          ↻ regenerate
+        </button>
+        <button class="btn"
+                hx-post="/people/approve"
+                hx-vals='{"draft_id": {{ r.draft_id }}}'
+                hx-target="#mention-{{ r.id }}"
+                hx-swap="outerHTML">
+          ✓ posted it
+        </button>
+        <button class="btn btn-dismiss"
+                hx-post="/people/reject"
+                hx-vals='{"draft_id": {{ r.draft_id }}}'
+                hx-target="#mention-{{ r.id }}"
+                hx-swap="outerHTML">
+          ✗ skip
+        </button>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if off_topic_ready %}
+  <section class="topic">
+    <h2>Off-topic — short reply drafted <span class="count">{{ off_topic_ready|length }}</span></h2>
+    <p class="section-note">These mentions don't match your interests, but they're friendly. Casual one-line drafts only — review before sending.</p>
+    {% for r in off_topic_ready %}
+    <article class="post mention off-topic" id="mention-{{ r.id }}">
+      <div class="post-header">
+        {% if r.author_avatar %}
+        <img class="avatar" src="{{ r.author_avatar }}" alt="" loading="lazy">
+        {% endif %}
+        <div class="post-meta">
+          <div class="author-line">
+            {% if r.author_display_name %}<span class="display-name">{{ r.author_display_name }}</span>{% endif %}
+            <span class="author">@{{ r.author_acct }}</span>
+          </div>
+          <div class="meta-line">
+            <span class="time">{{ r.created_at.strftime("%a %H:%M") }}</span>
+            <span class="kind-badge">{{ r.kind }}</span>
+            {% if r.interaction_count > 1 %}<span class="interaction-count">{{ r.interaction_count }} prior</span>{% endif %}
+            <span class="off-topic-tag">off-topic</span>
+          </div>
+        </div>
+      </div>
+
+      {% if r.parent_content %}
+      <div class="parent-quote">
+        <span class="quote-label">you:</span>
+        {{ r.parent_content[:200] }}{% if r.parent_content|length > 200 %}…{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="post-content">{{ r.post_content[:500]|default("(no text)", true) }}</div>
+
+      <div class="draft-block off-topic-draft">
+        <div class="draft-label">draft (gemma2 — off-topic):</div>
+        <div class="draft-text" id="draft-{{ r.draft_id }}">{{ r.draft_text }}</div>
+      </div>
+
+      <div class="post-actions">
+        <a class="btn btn-primary"
+           href="{% if r.post_local_id %}{{ mastodon_url }}/web/statuses/{{ r.post_local_id }}{% else %}{{ r.post_url }}{% endif %}"
+           target="_blank" rel="noopener">open & reply ↗</a>
+        <button class="btn"
+                onclick="navigator.clipboard.writeText({{ r.draft_text|tojson }}); this.textContent='copied'">
+          ⎘ copy draft
+        </button>
+        <button class="btn"
+                hx-post="/people/regenerate"
+                hx-vals='{"mention_id": {{ r.id }}}'
+                hx-target="#draft-{{ r.draft_id }}"
+                hx-swap="outerHTML">
+          ↻ regenerate
+        </button>
+        <button class="btn"
+                hx-post="/people/approve"
+                hx-vals='{"draft_id": {{ r.draft_id }}}'
+                hx-target="#mention-{{ r.id }}"
+                hx-swap="outerHTML">
+          ✓ posted it
+        </button>
+        <button class="btn btn-dismiss"
+                hx-post="/people/reject"
+                hx-vals='{"draft_id": {{ r.draft_id }}}'
+                hx-target="#mention-{{ r.id }}"
+                hx-swap="outerHTML">
+          ✗ skip
+        </button>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if refused_other %}
+  <section class="topic">
+    <h2>Refused — apology guard or model error <span class="count">{{ refused_other|length }}</span></h2>
+    <p class="section-note">Drafter blocked these. Most likely: generated text contained "sorry", "my fault", "unintentional", etc.</p>
+    {% for r in refused_other %}
+    <article class="post mention compact" id="mention-{{ r.id }}">
+      <div class="post-meta-compact">
+        <span class="author">@{{ r.author_acct }}</span>
+        <span class="time">{{ r.created_at.strftime("%a %H:%M") }}</span>
+        <span class="kind-badge">{{ r.kind }}</span>
+        <span class="off-topic-tag">{{ r.rationale or "no draft" }}</span>
+      </div>
+      <div class="post-content compact">{{ r.post_content[:200] }}{% if r.post_content|length > 200 %}…{% endif %}</div>
+      <div class="post-actions compact">
+        <a class="btn btn-small"
+           href="{% if r.post_local_id %}{{ mastodon_url }}/web/statuses/{{ r.post_local_id }}{% else %}{{ r.post_url }}{% endif %}"
+           target="_blank" rel="noopener">open ↗</a>
+        <button class="btn btn-small"
+                hx-post="/people/regenerate"
+                hx-vals='{"mention_id": {{ r.id }}}'
+                hx-target="#mention-{{ r.id }}"
+                hx-swap="outerHTML">
+          ↻ try again
+        </button>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if refused_hostile %}
+  <section class="topic">
+    <h2 class="warn">⚠ Hostile — handle manually <span class="count">{{ refused_hostile|length }}</span></h2>
+    {% for r in refused_hostile %}
+    <article class="post mention hostile" id="mention-{{ r.id }}">
+      <div class="post-meta-compact">
+        <span class="author">@{{ r.author_acct }}</span>
+        <span class="time">{{ r.created_at.strftime("%a %H:%M") }}</span>
+        <span class="kind-badge">{{ r.kind }}</span>
+      </div>
+      <div class="post-content">{{ r.post_content[:300] }}{% if r.post_content|length > 300 %}…{% endif %}</div>
+      <div class="post-actions">
+        <a class="btn"
+           href="{% if r.post_local_id %}{{ mastodon_url }}/web/statuses/{{ r.post_local_id }}{% else %}{{ r.post_url }}{% endif %}"
+           target="_blank" rel="noopener">open ↗</a>
+        <button class="btn btn-dismiss"
+                hx-post="/people/reject"
+                hx-vals='{"draft_id": 0}'
+                hx-target="#mention-{{ r.id }}"
+                hx-swap="outerHTML">
+          dismiss
+        </button>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if apology_thread %}
+  <details class="apology-thread">
+    <summary>
+      Apology thread (collapsed) <span class="count">{{ apology_thread|length }}</span>
+      <span class="section-note">replies to your April 11 post — one-time event, hidden by default</span>
+    </summary>
+    {% for r in apology_thread %}
+    <article class="post mention compact apology" id="mention-{{ r.id }}">
+      <div class="post-meta-compact">
+        <span class="author">@{{ r.author_acct }}</span>
+        <span class="time">{{ r.created_at.strftime("%a %H:%M") }}</span>
+        <span class="kind-badge">{{ r.kind }}</span>
+        <span class="off-topic-tag">apology thread</span>
+      </div>
+      {% if r.parent_content %}
+      <div class="parent-quote">
+        <span class="quote-label">your post:</span>
+        {{ r.parent_content[:200] }}{% if r.parent_content|length > 200 %}…{% endif %}
+      </div>
+      {% endif %}
+      <div class="post-content compact">{{ r.post_content[:400]|default("(no text)", true) }}{% if r.post_content and r.post_content|length > 400 %}…{% endif %}</div>
+      <div class="post-actions compact">
+        <a class="btn btn-small"
+           href="{% if r.post_local_id %}{{ mastodon_url }}/web/statuses/{{ r.post_local_id }}{% else %}{{ r.post_url }}{% endif %}"
+           target="_blank" rel="noopener">open ↗</a>
+      </div>
+    </article>
+    {% endfor %}
+  </details>
+  {% endif %}
+
+  {% if not on_topic_ready and not off_topic_ready and not refused_other and not refused_hostile and not apology_thread %}
+  <div class="empty">
+    No mentions yet. Run <code>pull_mentions</code> and <code>draft_pending</code>.
+  </div>
+  {% endif %}
+</main>
+
+<footer>
+  <p>fedi-studio · drafter never apologizes · drafts only for in-interest topics · you post manually</p>
+</footer>
+
+</body>
+</html>

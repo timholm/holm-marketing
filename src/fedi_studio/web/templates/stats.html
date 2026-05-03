@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - stats</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats"><strong>stats</strong></a>
+    <span>{{ now.strftime("%a %b %d %H:%M") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main class="stats-main">
+  <p class="intro">Dev dashboard. Live counts from <code>fedi_studio</code>.</p>
+
+  <section class="topic">
+    <h2>posts</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num">{{ post_totals.total }}</div><div class="stat-label">total posts</div></div>
+      <div class="stat-card"><div class="stat-num">{{ post_totals.last_24h }}</div><div class="stat-label">last 24h</div></div>
+      <div class="stat-card"><div class="stat-num">{{ post_totals.last_7d }}</div><div class="stat-label">last 7d</div></div>
+      <div class="stat-card"><div class="stat-num">{{ post_totals.last_30d }}</div><div class="stat-label">last 30d</div></div>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">posts/day, last 30d</div>
+      {{ line_svg|safe }}
+    </div>
+  </section>
+
+  <section class="topic">
+    <h2>score distribution</h2>
+    <div class="histogram">
+      {% for h in score_histogram %}
+      <div class="hist-row">
+        <span class="hist-label">{{ "%.1f"|format(h.lo) }}–{{ "%.1f"|format(h.hi) }}</span>
+        <progress class="hist-bar" value="{{ h.count }}" max="{{ max_hist }}"></progress>
+        <span class="hist-count">{{ h.count }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="topic">
+    <h2>top authors (last 7d)</h2>
+    <ol class="ranked-list">
+      {% for acct, n in top_authors %}
+      <li><span class="rank-acct">@{{ acct }}</span> <span class="rank-count">{{ n }}</span></li>
+      {% else %}
+      <li class="empty-row">no posts in window</li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section class="topic">
+    <h2>top tags (last 7d)</h2>
+    <ol class="ranked-list">
+      {% for tag, n in top_tags %}
+      <li><span class="rank-acct">#{{ tag }}</span> <span class="rank-count">{{ n }}</span></li>
+      {% else %}
+      <li class="empty-row">no tags in window</li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section class="topic">
+    <h2>partition sizes</h2>
+    <table class="partition-table">
+      <thead><tr><th>partition</th><th>size</th></tr></thead>
+      <tbody>
+        {% for name, bytes in partitions %}
+        <tr>
+          <td><code>{{ name }}</code></td>
+          <td>
+            {% if bytes >= 1048576 %}{{ "%.1f MB"|format(bytes / 1048576) }}
+            {% elif bytes >= 1024 %}{{ "%.1f KB"|format(bytes / 1024) }}
+            {% else %}{{ bytes }} B{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="topic">
+    <h2>mentions &amp; drafts</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num">{{ total_mentions }}</div><div class="stat-label">mentions total</div></div>
+      <div class="stat-card"><div class="stat-num">{{ draft_counts.total }}</div><div class="stat-label">drafts total</div></div>
+      <div class="stat-card"><div class="stat-num">{{ draft_counts.posted }}</div><div class="stat-label">posted</div></div>
+      <div class="stat-card"><div class="stat-num">{{ draft_counts.rejected }}</div><div class="stat-label">rejected</div></div>
+      <div class="stat-card"><div class="stat-num">{{ draft_counts.pending }}</div><div class="stat-label">pending</div></div>
+    </div>
+  </section>
+
+  <section class="topic">
+    <h2>training</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num">{{ training_labels }}</div><div class="stat-label">labels (like_v1, read, bookmark)</div></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>fedi-studio · dev dashboard · counts are live from <code>fedi_studio</code></p>
+</footer>
+
+</body>
+</html>

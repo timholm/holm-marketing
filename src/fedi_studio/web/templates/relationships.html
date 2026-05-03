@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - relationships</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships"><strong>relationships</strong></a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <span class="badge">{{ people|length }} people</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    Per-person view of every interaction. Pending drafts surface first, then
+    mutuals, then by recency. Excludes your own account and welcomebot.
+    {% if not mutuals_available %}
+    <strong>Mutual lookup unavailable</strong> (Mastodon DB not reachable from this host).
+    {% endif %}
+  </p>
+
+  {% if not people %}
+  <div class="empty">No interactions yet. Run <code>pull_mentions</code>.</div>
+  {% endif %}
+
+  {% for p in people %}
+  <article class="person-card{% if p.has_pending_draft %} has-pending{% endif %}{% if p.mutual %} mutual{% endif %}">
+    <div class="post-header">
+      {% if p.avatar %}<img class="avatar" src="{{ p.avatar }}" alt="" loading="lazy">{% endif %}
+      <div class="post-meta">
+        <div class="author-line">
+          {% if p.display_name %}<span class="display-name">{{ p.display_name }}</span>{% endif %}
+          <a class="author" href="{{ mastodon_url }}/@{{ p.author_acct }}" target="_blank" rel="noopener">@{{ p.author_acct }}</a>
+        </div>
+        <div class="meta-line">
+          <span class="time">last: {{ p.last_at.strftime("%b %d %H:%M") }}</span>
+          <span class="time">first: {{ p.first_at.strftime("%b %d") }}</span>
+          {% if p.has_pending_draft %}<span class="kind-badge">draft pending</span>{% endif %}
+          {% if p.mutual is true %}<span class="kind-badge mutual-badge">mutual</span>
+          {% elif p.mutual is false %}<span class="off-topic-tag">not mutual</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="person-stats">
+      {% if p.total_mentions %}<span class="stat">{{ p.total_mentions }} mention{{ "s" if p.total_mentions != 1 else "" }}</span>{% endif %}
+      {% if p.total_dms %}<span class="stat">{{ p.total_dms }} DM{{ "s" if p.total_dms != 1 else "" }}</span>{% endif %}
+      {% if p.total_follows %}<span class="stat">{{ p.total_follows }} follow event{{ "s" if p.total_follows != 1 else "" }}</span>{% endif %}
+    </div>
+
+    {% if p.topics_we_share %}
+    <div class="post-tags">
+      <span class="topic-label">they post about:</span>
+      {% for t in p.topics_we_share %}<span class="tag">#{{ t }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if p.recent %}
+    <details class="person-recent">
+      <summary>last {{ p.recent|length }} interaction{{ "s" if p.recent|length != 1 else "" }}</summary>
+      {% for r in p.recent %}
+      <div class="recent-row">
+        <div class="post-meta-compact">
+          <span class="time">{{ r.created_at.strftime("%b %d %H:%M") }}</span>
+          <span class="kind-badge">{{ r.kind }}</span>
+          {% if r.draft_id and not r.draft_posted_at and not r.draft_rejected_at %}
+            <span class="kind-badge mutual-badge">draft</span>
+          {% endif %}
+        </div>
+        {% if r.parent_content %}
+        <div class="parent-quote">
+          <span class="quote-label">you:</span>
+          {{ r.parent_content[:160] }}{% if r.parent_content|length > 160 %}…{% endif %}
+        </div>
+        {% endif %}
+        <div class="post-content compact">{{ r.post_content[:300]|default("(no text)", true) }}{% if r.post_content and r.post_content|length > 300 %}…{% endif %}</div>
+        {% if r.draft_text %}
+        <div class="draft-block {% if not r.on_topic %}off-topic-draft{% endif %}">
+          <div class="draft-label">draft{% if r.topic_match %} — {{ r.topic_match }}{% endif %}:</div>
+          <div class="draft-text">{{ r.draft_text }}</div>
+        </div>
+        {% endif %}
+        <div class="post-actions compact">
+          <a class="btn btn-small"
+             href="{% if r.post_local_id %}{{ mastodon_url }}/web/statuses/{{ r.post_local_id }}{% else %}{{ r.post_url }}{% endif %}"
+             target="_blank" rel="noopener">open ↗</a>
+        </div>
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+</main>
+
+<footer>
+  <p>fedi-studio · per-person view · grouped from mentions · click open to engage on holm.community</p>
+</footer>
+
+</body>
+</html>

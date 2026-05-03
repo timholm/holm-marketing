@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - weekly</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly"><strong>weekly</strong></a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main class="stats-main">
+  <p class="intro">
+    Two weekly rituals. Sunday photo captions on the left. Friday follow recommendations on the right.
+    <strong>Both produce drafts you copy to Mastodon.</strong> Nothing here posts on your behalf.
+  </p>
+
+  <div class="weekly-grid">
+    <section class="topic">
+      <h2>#SolarPunkSunday <span class="count">{{ photo_posts|length }}</span></h2>
+      <p class="section-note">Top 3 of your photo posts from the last 7 days, ranked by engagement.</p>
+
+      {% if not photo_posts %}
+        <div class="empty">
+          No photo posts of yours in the last 7 days. Post a photo from your cabin, garden, or desert
+          and it will appear here next Sunday.
+        </div>
+      {% endif %}
+
+      {% for p in photo_posts %}
+      <article class="post" id="photo-{{ p.id }}">
+        <div class="post-header">
+          {% if p.account_avatar %}<img class="avatar" src="{{ p.account_avatar }}" alt="" loading="lazy">{% endif %}
+          <div class="post-meta">
+            <div class="author-line">
+              {% if p.account_display_name %}<span class="display-name">{{ p.account_display_name }}</span>{% endif %}
+              <span class="time">{{ p.posted_at.strftime("%a %b %d") }}</span>
+            </div>
+            <div class="meta-line">
+              {% if p.favourites_count > 0 %}<span class="stat">★ {{ p.favourites_count }}</span>{% endif %}
+              {% if p.reblogs_count > 0 %}<span class="stat">↻ {{ p.reblogs_count }}</span>{% endif %}
+              {% if p.media_count > 0 %}<span class="stat">{{ p.media_count }} media</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        {% set clean = p.content|clean %}
+        {% if clean %}
+        <div class="post-content">{{ clean[:300] }}{% if clean|length > 300 %}…{% endif %}</div>
+        {% endif %}
+
+        {% if p.media_attachments %}
+        <div class="post-media media-{{ p.media_attachments|length }}">
+          {% for m in p.media_attachments[:4] %}
+            {% if m.type == "image" %}
+              <a href="{{ m.url }}" target="_blank" rel="noopener" class="media-link">
+                <img src="{{ m.preview_url or m.url }}" alt="{{ m.description or '' }}" loading="lazy">
+              </a>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="draft-block">
+          <div class="draft-label">caption suggestions (gemma2)</div>
+          {% if p.caption_options %}
+            {% for opt in p.caption_options %}
+              <div class="caption-option" id="cap-{{ p.id }}-{{ loop.index }}">
+                <span class="caption-num">{{ loop.index }}</span>
+                <span class="caption-text">{{ opt }}</span>
+                <button class="btn btn-small"
+                        type="button"
+                        onclick="navigator.clipboard.writeText({{ opt|tojson }}); this.textContent='copied'; setTimeout(()=>{this.textContent='⎘ copy'}, 1500);">
+                  ⎘ copy
+                </button>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="post-content compact">
+              {{ p.captions_error or "No suggestions; try refreshing the page." }}
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="post-actions">
+          <a class="btn btn-primary"
+             href="{{ p.local_id|holm_url(p.url) }}"
+             target="_blank" rel="noopener">open original ↗</a>
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+
+    <section class="topic">
+      <h2>#FollowFriday <span class="count">{{ ff_candidates|length }}</span></h2>
+      <p class="section-note">People you've had at least 2 meaningful interactions with this week.</p>
+
+      {% if not ff_candidates %}
+        <div class="empty">
+          No accounts qualify yet. Need at least 2 mentions or replies in the last 7 days.
+        </div>
+      {% endif %}
+
+      {% for c in ff_candidates %}
+      <article class="person-card">
+        <div class="post-header">
+          {% if c.avatar %}<img class="avatar" src="{{ c.avatar }}" alt="" loading="lazy">{% endif %}
+          <div class="post-meta">
+            <div class="author-line">
+              {% if c.display_name %}<span class="display-name">{{ c.display_name }}</span>{% endif %}
+              <span class="author">@{{ c.author_acct }}</span>
+            </div>
+            <div class="meta-line">
+              <span class="interaction-count">{{ c.interaction_count }} interactions</span>
+              <span class="time">last: {{ c.last_at.strftime("%a %H:%M") }}</span>
+            </div>
+            {% if c.topics %}
+            <div class="post-tags">
+              {% for t in c.topics %}<span class="tag">#{{ t }}</span>{% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% if c.recommendation %}
+        <div class="draft-block">
+          <div class="draft-label">recommendation draft</div>
+          <div class="draft-text">{{ c.recommendation }}</div>
+        </div>
+        {% else %}
+        <div class="post-content compact">No recommendation generated (Ollama may be unavailable).</div>
+        {% endif %}
+      </article>
+      {% endfor %}
+
+      {% if ff_bundle %}
+      <article class="post" style="margin-top: 1rem;">
+        <div class="draft-block">
+          <div class="draft-label">bundled #FollowFriday toot</div>
+          <div class="draft-text" id="ff-bundle" style="white-space: pre-wrap;">{{ ff_bundle }}</div>
+          <div class="post-actions" style="margin-top: 0.75rem;">
+            <button class="btn"
+                    type="button"
+                    onclick="navigator.clipboard.writeText({{ ff_bundle|tojson }}); this.textContent='copied'; setTimeout(()=>{this.textContent='⎘ copy bundle'}, 1500);">
+              ⎘ copy bundle
+            </button>
+            <a class="btn btn-primary" href="{{ mastodon_url }}/publish" target="_blank" rel="noopener">open mastodon compose ↗</a>
+          </div>
+        </div>
+      </article>
+      {% endif %}
+    </section>
+  </div>
+</main>
+
+<footer>
+  <p>fedi-studio · tool drafts; you post manually · weekly rituals are reminders, not auto-posts</p>
+</footer>
+
+</body>
+</html>

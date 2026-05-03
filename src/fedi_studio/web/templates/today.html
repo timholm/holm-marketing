@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - today</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today"><strong>today</strong></a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <span class="badge">{{ total }} posts</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    Your morning catch-up. Posts from the last 72 hours, ranked by what matches your interests.
+    <strong>Nothing here has been liked, boosted, or replied to on your behalf.</strong>
+    Click "open" to see the post on holm.community and engage there.
+  </p>
+
+  {% if total == 0 %}
+    <div class="empty">
+      Nothing to show yet. Run the ingest worker to pull posts.
+    </div>
+  {% endif %}
+
+  {% for topic, posts in grouped %}
+    <section class="topic">
+      <h2>{{ topic }} <span class="count">{{ posts|length }}</span></h2>
+      {% for p in posts %}
+      <article class="post" id="post-{{ p.id }}">
+        <div class="post-header">
+          {% if p.account_avatar %}
+          <img class="avatar" src="{{ p.account_avatar }}" alt="" loading="lazy">
+          {% endif %}
+          <div class="post-meta">
+            <div class="author-line">
+              {% if p.account_display_name %}
+              <span class="display-name">{{ p.account_display_name }}</span>
+              {% endif %}
+              <span class="author">@{{ p.author_acct }}</span>
+            </div>
+            <div class="meta-line">
+              <span class="time">{{ p.posted_at.strftime("%a %H:%M") }}</span>
+              <span class="score" title="logreg={{ p.reasoning.logreg }} centroid={{ p.reasoning.centroid }} prior={{ p.reasoning.author_prior }} recency={{ p.reasoning.recency }}">
+                {{ "%.2f"|format(p.probability) }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {% set clean = p.content|clean %}
+        <div class="post-content {% if p.sensitive %}sensitive{% endif %}">{{ clean[:800] }}{% if clean|length > 800 %}…{% endif %}</div>
+
+        {% if p.media_attachments and p.media_attachments|length > 0 %}
+        <div class="post-media media-{{ p.media_attachments|length }}">
+          {% for m in p.media_attachments %}
+            {% if m.type == "image" %}
+              <a href="{{ m.url }}" target="_blank" rel="noopener" class="media-link">
+                <img src="{{ m.preview_url or m.url }}" alt="{{ m.description or '' }}" loading="lazy">
+              </a>
+            {% elif m.type == "video" or m.type == "gifv" %}
+              <video controls preload="none" {% if m.preview_url %}poster="{{ m.preview_url }}"{% endif %} class="media-video">
+                <source src="{{ m.url }}">
+              </video>
+            {% elif m.type == "audio" %}
+              <audio controls preload="none" class="media-audio">
+                <source src="{{ m.url }}">
+              </audio>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if p.tags %}
+        <div class="post-tags">
+          {% for t in p.tags %}<span class="tag">#{{ t }}</span>{% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="post-stats">
+          {% if p.favourites_count > 0 %}<span>★ {{ p.favourites_count }}</span>{% endif %}
+          {% if p.reblogs_count > 0 %}<span>↻ {{ p.reblogs_count }}</span>{% endif %}
+        </div>
+
+        <div class="post-actions">
+          <a class="btn btn-primary"
+             href="{{ p.local_id|holm_url(p.url) }}"
+             target="_blank" rel="noopener"
+             title="Opens on holm.community so you can like/boost/reply">
+            open ↗
+          </a>
+          {% if p.bookmarked %}
+            <button class="btn btn-active" disabled>★ saved</button>
+          {% else %}
+            <button class="btn"
+                    hx-post="/feedback/bookmark"
+                    hx-vals='{"post_uri": "{{ p.uri }}"}'
+                    hx-swap="outerHTML">
+              ★ save
+            </button>
+          {% endif %}
+          {% if p.read %}
+            <button class="btn btn-active" disabled>✓ read</button>
+          {% else %}
+            <button class="btn"
+                    hx-post="/feedback/read"
+                    hx-vals='{"post_uri": "{{ p.uri }}"}'
+                    hx-swap="outerHTML">
+              ✓ read
+            </button>
+          {% endif %}
+          <button class="btn btn-dismiss"
+                  hx-post="/feedback/dismiss"
+                  hx-vals='{"post_uri": "{{ p.uri }}"}'
+                  hx-target="#post-{{ p.id }}"
+                  hx-swap="outerHTML">
+            ✗ dismiss
+          </button>
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+  {% endfor %}
+</main>
+
+<footer>
+  <p>fedi-studio · this is a reading tool · not a bot · acts only when Tim clicks</p>
+</footer>
+
+</body>
+</html>

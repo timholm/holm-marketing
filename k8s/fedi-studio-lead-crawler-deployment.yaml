@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fedi-studio-lead-crawler
+  namespace: fedi-discover
+  labels:
+    app: fedi-studio-lead-crawler
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: fedi-studio-lead-crawler
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2026-05-01T13:17:01-07:00'
+      labels:
+        app: fedi-studio-lead-crawler
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - command:
+        - python
+        - -m
+        - fedi_studio.workers.lead_crawler
+        env:
+        - name: V1_DSN
+          value: host=fedi-postgresql.fedi-discover.svc.cluster.local port=5432 dbname=fedi_discover_full
+            user=mastodon password=mastodon
+        - name: V2_DSN
+          value: host=fedi-postgresql.fedi-discover.svc.cluster.local port=5432 dbname=fedi_studio
+            user=mastodon password=mastodon
+        - name: FEDI_STUDIO_DSN
+          value: host=fedi-postgresql.fedi-discover.svc.cluster.local port=5432 dbname=fedi_studio
+            user=mastodon password=mastodon
+        - name: MASTODON_URL
+          value: https://holm.community
+        - name: MASTODON_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: mastodon-token
+              name: fedi-discover-secrets
+        - name: SCORER_PATH
+          value: /app/models/scorer_v2.pkl
+        - name: ENRICH_BATCH
+          value: '100'
+        - name: ENRICH_POLL_S
+          value: '15'
+        - name: MAX_CONCURRENCY
+          value: '30'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        - name: HF_HOME
+          value: /tmp/.cache
+        - name: BATCH_SIZE
+          value: '80'
+        - name: INSTANCE_COOLDOWN_S
+          value: '2'
+        - name: STATUSES_PER_ACCOUNT
+          value: '40'
+        - name: MAX_PAGES_PER_ACCOUNT
+          value: '8'
+        - name: MASTODON_TOKENS
+          valueFrom:
+            secretKeyRef:
+              key: mastodon-tokens
+              name: fedi-discover-secrets
+        # 8 pages × 40 = 320 statuses per profile per crawl. Bump to 25 for ~1k posts/profile,
+        # 75 for ~3k, 300 for full ~12k (will hit per-instance rate limits — needs more replicas
+        # spread across nodes for distinct egress IPs).
+        image: 192.168.8.197:30080/tim/fedi-studio:latest
+        imagePullPolicy: Always
+        name: fedi-studio-lead-crawler
+        resources:
+          requests:
+            cpu: 150m
+            memory: 512Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      # Spread replicas across nodes so each gets a distinct egress IP, multiplying
+      # our per-instance rate-limit allotment.
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: fedi-studio-lead-crawler
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir: {}
+        name: tmp

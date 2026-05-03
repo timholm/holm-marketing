@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - review</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .review-empty {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 3rem 2rem;
+    max-width: 600px;
+    margin: 2rem auto;
+    text-align: center;
+  }
+
+  .review-empty h2 {
+    font-size: 1.4rem;
+    color: var(--ink);
+    margin: 0 0 1rem;
+  }
+
+  .review-empty p {
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin: 0.75rem 0;
+  }
+
+  .review-empty .btn {
+    margin-top: 1.5rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review"><strong>review</strong></a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">holm.community</a>
+  </div>
+</header>
+
+<main>
+  <div class="review-empty">
+    <h2>All candidates reviewed!</h2>
+    <p>You have reviewed all available candidates in the queue.</p>
+    <p>Run the candidate build worker to generate more candidates:</p>
+    <p><code>.venv/bin/python -m fedi_studio.workers.build_candidates</code></p>
+    <a class="btn btn-primary" href="/candidates">back to candidates list</a>
+  </div>
+</main>
+
+<footer>
+  <p>fedi-studio · candidate review · review queue exhausted</p>
+</footer>
+
+</body>
+</html>

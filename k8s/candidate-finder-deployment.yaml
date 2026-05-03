@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: candidate-finder
+  name: candidate-finder
+  namespace: fedi-discover
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: candidate-finder
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2026-05-01T13:17:01-07:00'
+      labels:
+        app: candidate-finder
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - command:
+        - python
+        - -m
+        - fedi_studio.workers.enrich_pending_candidates
+        env:
+        - name: V1_DSN
+          value: host=fedi-postgresql.fedi-discover.svc.cluster.local port=5432 dbname=fedi_discover_full
+            user=mastodon password=mastodon
+        - name: V2_DSN
+          value: host=fedi-postgresql.fedi-discover.svc.cluster.local port=5432 dbname=fedi_studio
+            user=mastodon password=mastodon
+        - name: FEDI_STUDIO_DSN
+          value: host=fedi-postgresql.fedi-discover.svc.cluster.local port=5432 dbname=fedi_studio
+            user=mastodon password=mastodon
+        - name: MASTODON_URL
+          value: https://holm.community
+        - name: MASTODON_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: mastodon-token
+              name: fedi-discover-secrets
+        - name: SCORER_PATH
+          value: /app/models/scorer_v2.pkl
+        - name: ENRICH_BATCH
+          value: '100'
+        - name: ENRICH_POLL_S
+          value: '15'
+        - name: MAX_CONCURRENCY
+          value: '30'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        - name: HF_HOME
+          value: /tmp/.cache
+        - name: MASTODON_TOKENS
+          valueFrom:
+            secretKeyRef:
+              name: fedi-discover-secrets
+              key: mastodon-tokens
+        image: 192.168.8.197:30080/tim/fedi-studio:latest
+        imagePullPolicy: Always
+        name: candidate-finder
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir: {}
+        name: tmp

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - candidates</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .candidate-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px; }
+  .candidate { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; padding: 12px; border-radius: 6px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); }
+  .candidate .avatar { width: 64px; height: 64px; border-radius: 6px; object-fit: cover; }
+  .candidate .body { min-width: 0; }
+  .candidate .name { font-weight: 600; }
+  .candidate .acct { color: var(--muted, #888); font-size: 0.9em; }
+  .candidate .bio  { font-size: 0.92em; line-height: 1.35; margin: 6px 0; opacity: 0.9; max-height: 4.4em; overflow: hidden; }
+  .candidate .stats { font-size: 0.85em; opacity: 0.75; display: flex; gap: 12px; flex-wrap: wrap; }
+  .candidate .actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .candidate .score { font-variant-numeric: tabular-nums; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(120,200,120,0.15); }
+  .candidate .reasoning { font-size: 0.78em; opacity: 0.6; margin-top: 4px; }
+  .candidate.reviewed { opacity: 0.5; }
+  .candidate-decided { padding: 4px 8px; border-radius: 4px; background: rgba(120,200,120,0.2); font-size: 0.85em; }
+  .filters { display: flex; gap: 12px; margin: 12px 0; flex-wrap: wrap; align-items: center; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 6px; }
+  .filters label { display: flex; gap: 4px; align-items: center; font-size: 0.9em; }
+  .filters select, .filters input { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: inherit; padding: 4px 6px; border-radius: 3px; }
+  .pager { display: flex; gap: 8px; justify-content: center; margin: 16px 0; flex-wrap: wrap; }
+  .pager .btn { padding: 4px 10px; }
+  .summary-counts { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.92em; }
+  .summary-counts .pill { padding: 2px 8px; border-radius: 12px; background: rgba(255,255,255,0.05); }
+  .matched-topic { display: inline-block; font-size: 0.75em; padding: 1px 6px; margin-right: 4px; border-radius: 8px; background: rgba(120,160,255,0.15); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates"><strong>candidates</strong></a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    Curated candidate accounts for you to <strong>manually review and follow</strong>.
+    Scored by post quality, bio similarity to your interests, and topic match.
+    <strong>This page never calls the follow API</strong>: clicking "open in Mastodon"
+    takes you to the account on holm.community where you follow natively.
+    "mark followed" / "skip" only update local state.
+  </p>
+
+  <section class="summary-counts">
+    <span class="pill">total: <strong>{{ counts.total }}</strong></span>
+    <span class="pill">remaining: <strong>{{ counts.remaining }}</strong></span>
+    <span class="pill">reviewed: <strong>{{ counts.reviewed }}</strong></span>
+    <span class="pill">followed: <strong>{{ counts.followed }}</strong></span>
+    <span class="pill">skipped: <strong>{{ counts.skipped }}</strong></span>
+  </section>
+
+  <form class="filters" method="get" action="/candidates">
+    <label>show
+      <select name="show">
+        <option value="pending" {% if show == "pending" %}selected{% endif %}>pending</option>
+        <option value="reviewed" {% if show == "reviewed" %}selected{% endif %}>reviewed</option>
+        <option value="all" {% if show == "all" %}selected{% endif %}>all</option>
+      </select>
+    </label>
+    <label>instance
+      <select name="instance">
+        <option value="">(any)</option>
+        {% for inst, n in instance_options %}
+        <option value="{{ inst }}" {% if inst == instance %}selected{% endif %}>{{ inst }} ({{ n }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>min score
+      <input type="number" name="min_score" value="{{ min_score }}" min="0" max="1" step="0.05" style="width: 5em;">
+    </label>
+    <label>search
+      <input type="search" name="q" value="{{ q }}" placeholder="acct contains…" style="width: 14em;">
+    </label>
+    <button type="submit" class="btn btn-primary">apply</button>
+    <a class="btn-link" href="/candidates">reset</a>
+    <span style="margin-left: auto; opacity: 0.7; font-size: 0.9em;">
+      page {{ page }} / {{ total_pages }} · {{ filtered_total }} match
+    </span>
+  </form>
+
+  {% if not rows %}
+    <div class="empty" style="margin-top:24px;">
+      No candidates to show.
+      Run <code>.venv/bin/python -m fedi_studio.workers.build_candidates</code> to populate.
+    </div>
+  {% endif %}
+
+  <div class="candidate-grid">
+    {% for r in rows %}
+    <article class="candidate {% if r.reviewed %}reviewed{% endif %}" id="candidate-{{ r.id }}">
+      {% if r.avatar_url %}
+        <img class="avatar" src="{{ r.avatar_url }}" alt="" loading="lazy">
+      {% else %}
+        <div class="avatar" style="background:rgba(255,255,255,0.05)"></div>
+      {% endif %}
+      <div class="body">
+        <div class="name">
+          {% if r.display_name %}{{ r.display_name }}{% endif %}
+        </div>
+        <div class="acct">@{{ r.acct }}</div>
+        {% if r.bio %}
+        <div class="bio">{{ r.bio[:280] }}{% if r.bio|length > 280 %}…{% endif %}</div>
+        {% endif %}
+        <div class="stats">
+          {% if r.statuses_count is not none %}<span>{{ r.statuses_count }} posts</span>{% endif %}
+          {% if r.followers_count is not none %}<span>{{ r.followers_count }} followers</span>{% endif %}
+          {% if r.following_count is not none %}<span>{{ r.following_count }} following</span>{% endif %}
+          {% if r.last_status_at %}<span>last: {{ r.last_status_at.strftime("%Y-%m-%d") }}</span>{% endif %}
+          <span>{{ r.instance }}</span>
+          {% if r.locked %}<span style="color:#cc8">[locked]</span>{% endif %}
+        </div>
+        <div class="reasoning">
+          {% if r.reasoning %}
+            mean_prob={{ r.reasoning.mean_prob }} ·
+            centroid={{ r.reasoning.centroid_sim }} ·
+            topic_bonus={{ r.reasoning.topic_bonus }} ·
+            n={{ r.reasoning.n_recent_posts }} ·
+            sources={{ r.reasoning.sources|join(",") if r.reasoning.sources else "—" }}
+            {% if r.reasoning.matched_topics %}
+              <div>{% for t in r.reasoning.matched_topics %}<span class="matched-topic">{{ t }}</span>{% endfor %}</div>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      <div class="actions">
+        <span class="score">{{ "%.2f"|format(r.score or 0) }}</span>
+        {% if r.reviewed %}
+          <span class="candidate-decided">{% if r.decision == "followed" %}✓ followed{% else %}✗ skipped{% endif %}</span>
+        {% else %}
+          <a class="btn btn-primary"
+             href="{{ mastodon_url }}/@{{ r.acct }}"
+             target="_blank" rel="noopener"
+             title="Opens the account on holm.community where you can follow natively.">
+            open in Mastodon ↗
+          </a>
+          <button class="btn"
+                  hx-post="/candidates/{{ r.id }}/decision"
+                  hx-vals='{"decision": "followed"}'
+                  hx-target="#candidate-{{ r.id }} .actions"
+                  hx-swap="innerHTML">
+            ✓ mark followed
+          </button>
+          <button class="btn btn-dismiss"
+                  hx-post="/candidates/{{ r.id }}/decision"
+                  hx-vals='{"decision": "skipped"}'
+                  hx-target="#candidate-{{ r.id }} .actions"
+                  hx-swap="innerHTML">
+            ✗ skip
+          </button>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+
+  {% if total_pages > 1 %}
+  <nav class="pager">
+    {% set base_qs %}{% if instance %}&instance={{ instance }}{% endif %}{% if min_score > 0 %}&min_score={{ min_score }}{% endif %}{% if q %}&q={{ q }}{% endif %}&show={{ show }}{% endset %}
+    {% if page > 1 %}
+      <a class="btn" href="?page=1{{ base_qs }}">« first</a>
+      <a class="btn" href="?page={{ page-1 }}{{ base_qs }}">‹ prev</a>
+    {% endif %}
+    <span class="btn" style="opacity:.5; pointer-events:none;">page {{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+      <a class="btn" href="?page={{ page+1 }}{{ base_qs }}">next ›</a>
+      <a class="btn" href="?page={{ total_pages }}{{ base_qs }}">last »</a>
+    {% endif %}
+  </nav>
+  {% endif %}
+</main>
+
+<footer>
+  <p>fedi-studio · candidates list · read-only · this page never calls the follow API</p>
+</footer>
+
+</body>
+</html>

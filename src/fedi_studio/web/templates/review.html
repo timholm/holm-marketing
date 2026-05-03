@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - review</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .review-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 2rem;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .review-header {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .avatar-big {
+    width: 120px;
+    height: 120px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--line);
+  }
+
+  .review-title {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .review-title .display-name {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  .review-title .acct {
+    font-size: 1rem;
+    color: var(--muted);
+    margin: 0.3rem 0 0 0;
+  }
+
+  .review-title .instance-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 0.3rem 0.6rem;
+    border-radius: 999px;
+    margin-top: 0.5rem;
+    width: fit-content;
+  }
+
+  .review-bio {
+    background: var(--bg);
+    border-left: 3px solid var(--accent);
+    padding: 1rem;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--ink);
+  }
+
+  .review-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-item {
+    background: var(--bg);
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+  }
+
+  .stat-label {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .stat-value {
+    color: var(--ink);
+    font-weight: 600;
+    margin-top: 0.2rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  .review-score-breakdown {
+    background: var(--accent-soft);
+    border-radius: 6px;
+    padding: 0.9rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+  }
+
+  .score-item {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    align-items: center;
+  }
+
+  .score-item:last-child { margin-bottom: 0; }
+
+  .score-label {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+
+  .score-val {
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-weight: 600;
+  }
+
+  .matched-topics {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+  }
+
+  .topic-chip {
+    display: inline-block;
+    font-size: 0.75em;
+    padding: 0.2rem 0.6rem;
+    border-radius: 8px;
+    background: rgba(120,160,255,0.15);
+    color: var(--accent);
+  }
+
+  .recent-posts {
+    margin-bottom: 1.5rem;
+  }
+
+  .recent-posts-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .recent-post {
+    background: var(--bg);
+    border-left: 3px solid var(--line);
+    padding: 0.6rem 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+
+  .recent-post:last-child { margin-bottom: 0; }
+
+  .recent-post .post-text {
+    color: var(--ink);
+    word-wrap: break-word;
+    margin-bottom: 0.3rem;
+  }
+
+  .recent-post .post-meta {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .review-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .action-row {
+    display: flex;
+    gap: 0.6rem;
+  }
+
+  .btn-follow {
+    flex: 1;
+    padding: 0.75rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    transition: filter 0.15s ease;
+  }
+
+  .btn-follow:hover { filter: brightness(1.1); }
+
+  .btn-skip {
+    flex: 1;
+    padding: 0.75rem;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .btn-skip:hover { border-color: var(--bad); color: var(--bad); }
+
+  .btn-next {
+    padding: 0.75rem;
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .btn-next:hover { border-color: var(--accent); color: var(--accent); }
+
+  .keys {
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px dashed var(--line);
+  }
+
+  .queue-status {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 1.5rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg);
+    border-radius: 6px;
+  }
+
+  .queue-status strong { color: var(--ink); }
+
+  #review-content { transition: opacity 0.2s ease; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review"><strong>review</strong></a>
+    <a class="btn-link" href="/draft">draft</a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">holm.community</a>
+  </div>
+</header>
+
+<main>
+  <div class="queue-status">
+    <strong>{{ queue_pending }}</strong> of <strong>{{ queue_total }}</strong> pending review
+    {% if queue_today > 0 %}· <strong>{{ queue_today }}</strong> reviewed today{% endif %}
+  </div>
+
+  <div id="review-content">
+    {% if candidate %}
+    <div class="review-card">
+      <div class="review-header">
+        {% if candidate.avatar_url %}
+          <img class="avatar-big" src="{{ candidate.avatar_url }}" alt="">
+        {% else %}
+          <div class="avatar-big" style="background:var(--line)"></div>
+        {% endif %}
+        <div class="review-title">
+          <div class="display-name">{{ candidate.display_name or "?" }}</div>
+          <div class="acct">@{{ candidate.acct }}</div>
+          {% if candidate.instance %}
+            <span class="instance-badge">{{ candidate.instance }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if candidate.bio %}
+      <div class="review-bio">{{ candidate.bio }}</div>
+      {% else %}
+      <div class="review-bio" style="color:var(--muted); font-style:italic;">No bio provided</div>
+      {% endif %}
+
+      <div class="review-stats">
+        {% if candidate.followers_count is not none %}
+        <div class="stat-item">
+          <div class="stat-label">followers</div>
+          <div class="stat-value">{{ candidate.followers_count }}</div>
+        </div>
+        {% endif %}
+        {% if candidate.following_count is not none %}
+        <div class="stat-item">
+          <div class="stat-label">following</div>
+          <div class="stat-value">{{ candidate.following_count }}</div>
+        </div>
+        {% endif %}
+        {% if candidate.statuses_count is not none %}
+        <div class="stat-item">
+          <div class="stat-label">posts</div>
+          <div class="stat-value">{{ candidate.statuses_count }}</div>
+        </div>
+        {% endif %}
+        {% if candidate.last_status_at %}
+        <div class="stat-item">
+          <div class="stat-label">last post</div>
+          <div class="stat-value">{{ candidate.last_status_at.strftime("%Y-%m-%d") }}</div>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if candidate.reasoning %}
+      <div class="review-score-breakdown">
+        <div class="score-item">
+          <div class="score-label">score</div>
+          <div class="score-val">{{ "%.3f"|format(candidate.score or 0) }}</div>
+        </div>
+        {% if candidate.reasoning.mean_prob is not none %}
+        <div class="score-item">
+          <div class="score-label">mean_prob</div>
+          <div class="score-val">{{ "%.3f"|format(candidate.reasoning.mean_prob) }}</div>
+        </div>
+        {% endif %}
+        {% if candidate.reasoning.centroid_sim is not none %}
+        <div class="score-item">
+          <div class="score-label">centroid_sim</div>
+          <div class="score-val">{{ "%.3f"|format(candidate.reasoning.centroid_sim) }}</div>
+        </div>
+        {% endif %}
+        {% if candidate.reasoning.topic_bonus is not none %}
+        <div class="score-item">
+          <div class="score-label">topic_bonus</div>
+          <div class="score-val">{{ "%.3f"|format(candidate.reasoning.topic_bonus) }}</div>
+        </div>
+        {% endif %}
+        {% if candidate.reasoning.matched_topics %}
+        <div class="matched-topics">
+          {% for topic in candidate.reasoning.matched_topics %}
+            <span class="topic-chip">{{ topic }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if recent_posts %}
+      <div class="recent-posts">
+        <div class="recent-posts-label">recent posts ({{ recent_posts|length }})</div>
+        {% for post in recent_posts %}
+        <div class="recent-post">
+          <div class="post-text">{{ post.content[:140] }}{% if post.content|length > 140 %}…{% endif %}</div>
+          <div class="post-meta">{{ post.posted_at.strftime("%Y-%m-%d") }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="recent-posts">
+        <div class="recent-posts-label">recent posts</div>
+        <div class="recent-post" style="color:var(--muted);font-style:italic;">No posts in system yet</div>
+      </div>
+      {% endif %}
+
+      <div class="review-actions">
+        <div class="action-row">
+          <a class="btn-follow"
+             href="{{ mastodon_url }}/@{{ candidate.acct }}"
+             target="_blank" rel="noopener"
+             hx-post="/candidates/{{ candidate.id }}/decision"
+             hx-vals='{"decision": "followed"}'
+             hx-target="#review-content"
+             hx-swap="outerHTML swap:1s"
+             onclick="event.preventDefault(); window.open('{{ mastodon_url }}/@{{ candidate.acct }}', '_blank'); htmx.ajax('POST', '/candidates/{{ candidate.id }}/decision', {values: {decision: 'followed'}, target: document.querySelector('#review-content'), swap: 'outerHTML swap:1s'});">
+            open in holm.community (f)
+          </a>
+        </div>
+        <div class="action-row">
+          <button class="btn-skip"
+                  hx-post="/candidates/{{ candidate.id }}/decision"
+                  hx-vals='{"decision": "skipped"}'
+                  hx-target="#review-content"
+                  hx-swap="outerHTML swap:1s">
+            skip (s)
+          </button>
+          <button class="btn-next"
+                  hx-get="/review"
+                  hx-target="#review-content"
+                  hx-swap="outerHTML swap:1s">
+            next (n)
+          </button>
+        </div>
+      </div>
+
+      <div class="keys">
+        <strong>f</strong> = open in holm.community
+        &nbsp;&nbsp;
+        <strong>s</strong> = skip
+        &nbsp;&nbsp;
+        <strong>n</strong> = next (no decision)
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</main>
+
+<footer>
+  <p>fedi-studio · candidate review · one-at-a-time detail view</p>
+</footer>
+
+<script>
+  document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const link = document.querySelector('.btn-follow');
+      if (link) {
+        window.open(link.href, '_blank');
+        htmx.ajax('POST', link.getAttribute('hx-post'), {
+          values: {decision: 'followed'},
+          target: document.querySelector('#review-content'),
+          swap: 'outerHTML swap:1s'
+        });
+      }
+    }
+    if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const btn = document.querySelector('.btn-skip');
+      if (btn) htmx.trigger(btn, 'click');
+    }
+    if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const btn = document.querySelector('.btn-next');
+      if (btn) htmx.trigger(btn, 'click');
+    }
+  });
+</script>
+
+</body>
+</html>

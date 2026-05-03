@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fedi-studio - draft</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>fedi-studio</h1>
+  <div class="header-meta">
+    <a class="btn-link" href="/today">today</a>
+    <a class="btn-link" href="/people">people</a>
+    <a class="btn-link" href="/relationships">relationships</a>
+    <a class="btn-link" href="/candidates">candidates</a>
+    <a class="btn-link" href="/review">review</a>
+    <a class="btn-link" href="/draft"><strong>draft</strong></a>
+    <a class="btn-link" href="/weekly">weekly</a>
+    <a class="btn-link" href="/intro-wizard">intro</a>
+    <a class="btn-link" href="/stats">stats</a>
+    <span>{{ now.strftime("%a %b %d") }}</span>
+    <a class="btn-link" href="{{ mastodon_url }}">→ holm.community</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    Paste a draft post or reply. We critique it. <strong>We do not rewrite it. We do not post it.</strong>
+    The text comes back unchanged with a list of warnings you can choose to address.
+  </p>
+
+  <form method="POST" action="/draft" class="draft-form">
+    <label class="form-label" for="text">your draft text</label>
+    <textarea id="text" name="text" rows="8" placeholder="paste or type the post you're considering…">{{ text }}</textarea>
+
+    <div class="draft-form-row">
+      <fieldset class="form-group">
+        <legend class="form-label">image attached?</legend>
+        <label><input type="radio" name="has_image" value="no" {% if has_image != "yes" %}checked{% endif %}> no</label>
+        <label><input type="radio" name="has_image" value="yes" {% if has_image == "yes" %}checked{% endif %}> yes</label>
+      </fieldset>
+
+      <div class="form-group">
+        <label class="form-label" for="alt_text">alt-text (if image)</label>
+        <input id="alt_text" name="alt_text" type="text" value="{{ alt_text or '' }}" placeholder="describe what's in the image…">
+      </div>
+    </div>
+
+    <label class="form-label" for="reply_url">replying to a URL? (optional)</label>
+    <input id="reply_url" name="reply_url" type="url" value="{{ reply_url or '' }}" placeholder="https://example.social/@user/12345">
+
+    <div class="post-actions" style="margin-top: 1rem;">
+      <button class="btn btn-primary" type="submit">check it</button>
+      <a class="btn" href="/draft">clear</a>
+    </div>
+  </form>
+
+  {% if checked %}
+    <section class="topic">
+      <h2>warnings <span class="count">{{ warnings|length }}</span></h2>
+      {% if warnings %}
+        <div class="warnings-list">
+          {% for w in warnings %}
+            <div class="warning warn-{{ w.level }}">
+              <span class="warn-level">{{ w.level }}</span>
+              <span class="warn-code">{{ w.code }}</span>
+              <span class="warn-msg">{{ w.msg }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">No warnings. The draft passed every check we run.</div>
+      {% endif %}
+    </section>
+
+    <section class="topic">
+      <h2>your draft (unchanged)</h2>
+      <div class="draft-block">
+        <div class="draft-label">copy this to mastodon's compose UI</div>
+        <div class="draft-text" id="finaldraft">{{ text }}</div>
+        <div class="post-actions" style="margin-top: 0.75rem;">
+          <button class="btn"
+                  type="button"
+                  onclick="navigator.clipboard.writeText({{ text|tojson }}); this.textContent='copied'; setTimeout(()=>{this.textContent='⎘ copy to clipboard'}, 1500);">
+            ⎘ copy to clipboard
+          </button>
+          <a class="btn btn-primary" href="{{ mastodon_url }}/publish" target="_blank" rel="noopener">open mastodon compose ↗</a>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+</main>
+
+<footer>
+  <p>fedi-studio · tool drafts; you post manually · nothing here calls mastodon's POST endpoints</p>
+</footer>
+
+</body>
+</html>
