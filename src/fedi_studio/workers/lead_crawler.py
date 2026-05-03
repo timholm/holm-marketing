@@ -617,40 +617,43 @@ async def crawler() -> None:
 
     try:
         while _running:
-            # Read next batch of profiles from v1, ordered by last_crawled_at ASC
-            # Prioritize profiles with cached mastodon_id (2x faster, no lookup needed)
+            # 2026-05-03: switched data source from v1.profiles to v2.candidates_pending,
+            # because v1 was reset during the PG migration. candidates_pending is filled
+            # by mass-crawler/firehose with author_acct from every new post. We pick the
+            # oldest seen entries first.
             profiles_batch = []
             v1_conn = None
             try:
-                v1_conn = psycopg.connect(V1_DSN, connect_timeout=10)
+                v1_conn = psycopg.connect(V2_DSN, connect_timeout=10)
                 with v1_conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT id, acct, instance, is_active,
-                               (raw_data::jsonb->>'id') as mastodon_id,
-                               COALESCE(last_crawled_at, '1970-01-01') as last_crawled
-                        FROM profiles
-                        WHERE is_active = 1
-                          AND (last_crawled_at IS NULL
-                               OR last_crawled_at < NOW() - INTERVAL '%d days')
-                        ORDER BY (raw_data::jsonb ? 'id') DESC, COALESCE(last_crawled_at, '1970-01-01') ASC
+                        SELECT acct, source_post_uri, first_seen_at
+                        FROM candidates_pending
+                        WHERE enriched_at IS NULL
+                           OR enriched_at < NOW() - INTERVAL '%d days'
+                        ORDER BY first_seen_at ASC
                         LIMIT %s
                         """
                         % (MIN_CRAWL_INTERVAL_DAYS, BATCH_SIZE)
                     )
-                    profiles_batch = [
-                        {
-                            "id": r[0],
-                            "acct": r[1],
-                            "instance": r[2],
-                            "is_active": r[3],
-                            "mastodon_id": r[4],
-                            "last_crawled": r[5],
-                        }
-                        for r in cur
-                    ]
+                    rows = cur.fetchall()
+                    for r in rows:
+                        acct = r[0]
+                        # Parse acct = "user@instance" — instance is what we'll lookup against
+                        if "@" not in acct:
+                            continue
+                        local, instance = acct.split("@", 1)
+                        profiles_batch.append({
+                            "id": None,
+                            "acct": acct,
+                            "instance": instance.strip("/").lower(),
+                            "is_active": 1,
+                            "mastodon_id": None,  # will be resolved via /accounts/lookup
+                            "last_crawled": r[2],
+                        })
             except Exception as e:
-                log.warning("failed to fetch profiles batch: %s", e)
+                log.warning("failed to fetch candidates batch: %s", e)
                 if v1_conn:
                     v1_conn.close()
                 await asyncio.sleep(5)

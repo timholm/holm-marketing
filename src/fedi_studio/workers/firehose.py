@@ -295,77 +295,57 @@ def _flush_batch(batch: list[tuple[dict, str]]) -> int:
     inserted = 0
     queued_for_enrichment = 0
 
-    # 2026-05-03: switched from per-row INSERT/SAVEPOINT to execute_values batch.
-    # Reduces ~3 round-trips per row to ~2 round-trips for the whole batch.
-    # `xmax = 0` distinguishes new inserts from upsert-updates so we can still
-    # count "actually new" rows.
-    upsert_sql = """
-        INSERT INTO posts (
-            uri, url, author_acct, content, content_hash,
-            tags, language, in_reply_to_id, sensitive,
-            media_count, favourites_count, reblogs_count,
-            posted_at, embedding,
-            local_id, media_attachments, account_avatar, account_display_name
-        ) VALUES %s
-        ON CONFLICT (uri, posted_at) DO UPDATE SET
-            favourites_count = GREATEST(posts.favourites_count, EXCLUDED.favourites_count),
-            reblogs_count    = GREATEST(posts.reblogs_count,    EXCLUDED.reblogs_count),
-            media_attachments = EXCLUDED.media_attachments,
-            account_avatar = COALESCE(posts.account_avatar, EXCLUDED.account_avatar),
-            account_display_name = COALESCE(posts.account_display_name, EXCLUDED.account_display_name)
-        RETURNING uri, author_acct, (xmax = 0) AS is_insert
-    """
-    pending_sql = """
-        INSERT INTO candidates_pending (acct, source_post_uri)
-        VALUES %s
-        ON CONFLICT (acct) DO NOTHING
-    """
-    try:
-        import psycopg.rows as _pgrows  # noqa: F401  (psycopg3 import sanity)
-        from psycopg import sql as _psql  # noqa: F401
-    except ImportError:
-        pass
+    # 2026-05-03: switched from per-row INSERT/SAVEPOINT to a single multi-row INSERT
+    # built via psycopg's SQL composition. Pre-filter URIs in PG to avoid lock
+    # contention on (uri, posted_at) unique index, then issue ONE batch INSERT.
+    # This image uses psycopg3 (not psycopg2), so we use psycopg.sql.SQL composition
+    # rather than psycopg2.extras.execute_values.
+    from psycopg import sql as _psql
+
+    pending_template = _psql.SQL("(%s, %s)")
+    row_template = _psql.SQL("(") + _psql.SQL(",").join([_psql.Placeholder()] * 18) + _psql.SQL(")")
 
     try:
-        # Use psycopg2's execute_values if available; fall back to psycopg3 executemany.
-        import psycopg2.extras as _pg2_extras
         with get_conn() as conn:
             with conn.cursor() as cur:
-                returned = _pg2_extras.execute_values(
-                    cur, upsert_sql, rows, fetch=True
+                # Pre-filter: SELECT existing uris in one round-trip
+                uris = [r[0] for r in rows]
+                cur.execute(
+                    "SELECT uri FROM posts WHERE uri = ANY(%s::text[])",
+                    (uris,),
                 )
-                inserted = sum(1 for r in returned if r[2])
-                cand_rows = [(r[1], r[0]) for r in returned if r[2] and r[1]]
-                if cand_rows:
-                    _pg2_extras.execute_values(cur, pending_sql, cand_rows)
-                    queued_for_enrichment = len(cand_rows)
-            conn.commit()
-    except ImportError:
-        # psycopg3 path — same logic, executemany and a single RETURNING via
-        # cur.copy isn't available, so use cur.executemany which is still much
-        # faster than per-row SAVEPOINT.
-        try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    for row in rows:
-                        cur.execute(
-                            upsert_sql.replace("VALUES %s", "VALUES (" + ",".join(["%s"]*18) + ")"),
-                            row,
+                existing = {row[0] for row in cur.fetchall()}
+                fresh_rows = [r for r in rows if r[0] not in existing] if existing else rows
+
+                if fresh_rows:
+                    values_sql = _psql.SQL(",").join([row_template] * len(fresh_rows))
+                    insert_sql = _psql.SQL(
+                        "INSERT INTO posts (uri, url, author_acct, content, content_hash, "
+                        "tags, language, in_reply_to_id, sensitive, media_count, "
+                        "favourites_count, reblogs_count, posted_at, embedding, local_id, "
+                        "media_attachments, account_avatar, account_display_name) "
+                        "VALUES "
+                    ) + values_sql + _psql.SQL(
+                        " ON CONFLICT (uri, posted_at) DO NOTHING "
+                        "RETURNING uri, author_acct"
+                    )
+                    flat_params = [v for row in fresh_rows for v in row]
+                    cur.execute(insert_sql, flat_params)
+                    returned = cur.fetchall()
+                    inserted = len(returned)
+
+                    cand_rows = [(r[1], r[0]) for r in returned if r[1]]
+                    if cand_rows:
+                        cand_values_sql = _psql.SQL(",").join([pending_template] * len(cand_rows))
+                        cand_insert = _psql.SQL(
+                            "INSERT INTO candidates_pending (acct, source_post_uri) VALUES "
+                        ) + cand_values_sql + _psql.SQL(
+                            " ON CONFLICT (acct) DO NOTHING"
                         )
-                        result = cur.fetchone()
-                        if result and result[2]:
-                            inserted += 1
-                            if result[1]:
-                                cur.execute(
-                                    pending_sql.replace("VALUES %s", "VALUES (%s, %s)"),
-                                    (result[1], result[0]),
-                                )
-                                if cur.rowcount > 0:
-                                    queued_for_enrichment += 1
-                conn.commit()
-        except Exception as e:
-            log.warning("DB flush (psycopg3 path) failed: %s", e)
-            return 0
+                        cand_flat = [v for row in cand_rows for v in row]
+                        cur.execute(cand_insert, cand_flat)
+                        queued_for_enrichment = len(cand_rows)
+            conn.commit()
     except Exception as e:
         log.warning("DB flush failed: %s", e)
         return 0
