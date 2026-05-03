@@ -294,51 +294,82 @@ def _flush_batch(batch: list[tuple[dict, str]]) -> int:
 
     inserted = 0
     queued_for_enrichment = 0
-    sql = """
+
+    # 2026-05-03: switched from per-row INSERT/SAVEPOINT to execute_values batch.
+    # Reduces ~3 round-trips per row to ~2 round-trips for the whole batch.
+    # `xmax = 0` distinguishes new inserts from upsert-updates so we can still
+    # count "actually new" rows.
+    upsert_sql = """
         INSERT INTO posts (
             uri, url, author_acct, content, content_hash,
             tags, language, in_reply_to_id, sensitive,
             media_count, favourites_count, reblogs_count,
             posted_at, embedding,
             local_id, media_attachments, account_avatar, account_display_name
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES %s
         ON CONFLICT (uri, posted_at) DO UPDATE SET
             favourites_count = GREATEST(posts.favourites_count, EXCLUDED.favourites_count),
             reblogs_count    = GREATEST(posts.reblogs_count,    EXCLUDED.reblogs_count),
             media_attachments = EXCLUDED.media_attachments,
             account_avatar = COALESCE(posts.account_avatar, EXCLUDED.account_avatar),
             account_display_name = COALESCE(posts.account_display_name, EXCLUDED.account_display_name)
+        RETURNING uri, author_acct, (xmax = 0) AS is_insert
     """
     pending_sql = """
         INSERT INTO candidates_pending (acct, source_post_uri)
-        VALUES (%s, %s)
+        VALUES %s
         ON CONFLICT (acct) DO NOTHING
     """
     try:
+        import psycopg.rows as _pgrows  # noqa: F401  (psycopg3 import sanity)
+        from psycopg import sql as _psql  # noqa: F401
+    except ImportError:
+        pass
+
+    try:
+        # Use psycopg2's execute_values if available; fall back to psycopg3 executemany.
+        import psycopg2.extras as _pg2_extras
         with get_conn() as conn:
             with conn.cursor() as cur:
-                for row in rows:
-                    cur.execute("SAVEPOINT row_sp")
-                    try:
-                        cur.execute(sql, row)
-                        if cur.rowcount > 0:
+                returned = _pg2_extras.execute_values(
+                    cur, upsert_sql, rows, fetch=True
+                )
+                inserted = sum(1 for r in returned if r[2])
+                cand_rows = [(r[1], r[0]) for r in returned if r[2] and r[1]]
+                if cand_rows:
+                    _pg2_extras.execute_values(cur, pending_sql, cand_rows)
+                    queued_for_enrichment = len(cand_rows)
+            conn.commit()
+    except ImportError:
+        # psycopg3 path — same logic, executemany and a single RETURNING via
+        # cur.copy isn't available, so use cur.executemany which is still much
+        # faster than per-row SAVEPOINT.
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    for row in rows:
+                        cur.execute(
+                            upsert_sql.replace("VALUES %s", "VALUES (" + ",".join(["%s"]*18) + ")"),
+                            row,
+                        )
+                        result = cur.fetchone()
+                        if result and result[2]:
                             inserted += 1
-                            # Queue author for candidate enrichment.
-                            # row[0] = uri, row[2] = author_acct.
-                            author_acct = row[2]
-                            uri = row[0]
-                            if author_acct:
-                                cur.execute(pending_sql, (author_acct, uri))
+                            if result[1]:
+                                cur.execute(
+                                    pending_sql.replace("VALUES %s", "VALUES (%s, %s)"),
+                                    (result[1], result[0]),
+                                )
                                 if cur.rowcount > 0:
                                     queued_for_enrichment += 1
-                        cur.execute("RELEASE SAVEPOINT row_sp")
-                    except Exception as e:
-                        cur.execute("ROLLBACK TO SAVEPOINT row_sp")
-                        log.debug("row insert failed: %s", e)
-            conn.commit()
+                conn.commit()
+        except Exception as e:
+            log.warning("DB flush (psycopg3 path) failed: %s", e)
+            return 0
     except Exception as e:
         log.warning("DB flush failed: %s", e)
         return 0
+
     _stats.inserted += inserted
     if queued_for_enrichment > 0:
         log.debug("queued %d new authors for candidate enrichment", queued_for_enrichment)

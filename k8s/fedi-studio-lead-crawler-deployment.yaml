@@ -59,15 +59,18 @@ spec:
         - name: STATUSES_PER_ACCOUNT
           value: '40'
         - name: MAX_PAGES_PER_ACCOUNT
-          value: '8'
+          value: '50'
         - name: MASTODON_TOKENS
           valueFrom:
             secretKeyRef:
               key: mastodon-tokens
               name: fedi-discover-secrets
-        # 8 pages × 40 = 320 statuses per profile per crawl. Bump to 25 for ~1k posts/profile,
-        # 75 for ~3k, 300 for full ~12k (will hit per-instance rate limits — needs more replicas
-        # spread across nodes for distinct egress IPs).
+        # 50 pages × 40 = 2000 statuses per profile per crawl. Empirically tested 2026-05-03:
+        # Mastodon's accounts/{id}/statuses serves a sliding cached window, not lifetime
+        # history. Profiles advertising 25k-214k posts yielded only 1.4k-2k before silent
+        # timeouts. Going past 50 pages burns request budget on empty/dropped responses.
+        # Cluster has ONE shared egress IP (NAT) so 60 req/min/instance — keep concurrency
+        # against any single instance low. 24k candidates * 2000 = ~48M posts ceiling.
         image: 192.168.8.197:30080/tim/fedi-studio:latest
         imagePullPolicy: Always
         name: fedi-studio-lead-crawler
